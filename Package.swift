@@ -9,38 +9,17 @@ let package = Package(
         .macOS(.v14)
     ],
     products: [
-        .library(
-            name: "DirectorsCutEditor",
-            targets: ["Editor"]
-        ),
-        .library(
-            name: "DirectorsCutRender",
-            targets: ["Render"]
-        ),
-        .library(
-            name: "DirectorsCutEffects",
-            targets: ["Effects"]
-        ),
-        .library(
-            name: "DirectorsCutAI",
-            targets: ["AI"]
-        ),
-        .library(
-            name: "DirectorsCutExport",
-            targets: ["Export"]
-        ),
-        .library(
-            name: "DirectorsCutMedia",
-            targets: ["Media"]
-        ),
-        .library(
-            name: "DirectorsCutUI",
-            targets: ["UI"]
-        ),
+        .library(name: "DirectorsCutEditor",  targets: ["Editor"]),
+        .library(name: "DirectorsCutRender",  targets: ["Render"]),
+        .library(name: "DirectorsCutEffects", targets: ["Effects"]),
+        .library(name: "DirectorsCutAI",      targets: ["AI"]),
+        .library(name: "DirectorsCutExport",  targets: ["Export"]),
+        .library(name: "DirectorsCutMedia",   targets: ["Media"]),
+        .library(name: "DirectorsCutUI",      targets: ["UI"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/argmaxinc/WhisperKit.git", from: "0.9.0"),
-    ],
+    // NOTE: WhisperKit will be added back in Phase 3 when AI features are implemented.
+    // To add it: .package(url: "https://github.com/argmaxinc/WhisperKit.git", from: "0.9.0")
+    dependencies: [],
     targets: [
         // Core editor engine: timeline model, undo/redo, serialization
         .target(
@@ -49,14 +28,8 @@ let package = Package(
             path: "Sources/Editor"
         ),
 
-        // Video render pipeline: AVComposition builder, Metal compositor, preview
-        .target(
-            name: "Render",
-            dependencies: ["Editor", "Effects"],
-            path: "Sources/Render"
-        ),
-
         // Metal GPU effects: shaders, color grading, transitions
+        // Must come before Render because Render depends on it.
         .target(
             name: "Effects",
             dependencies: [],
@@ -66,13 +39,18 @@ let package = Package(
             ]
         ),
 
-        // AI features: WhisperKit captions, Vision segmentation, tracking
+        // Video render pipeline: AVComposition builder, Metal compositor, preview
+        .target(
+            name: "Render",
+            dependencies: ["Editor", "Effects"],
+            path: "Sources/Render"
+        ),
+
+        // AI features: stubs for Phase 1, full implementation in Phase 3
+        // (Vision, Core ML, WhisperKit — no external deps until Phase 3)
         .target(
             name: "AI",
-            dependencies: [
-                "Editor",
-                .product(name: "WhisperKit", package: "WhisperKit"),
-            ],
+            dependencies: ["Editor"],
             path: "Sources/AI"
         ),
 
@@ -91,17 +69,12 @@ let package = Package(
         ),
 
         // UI components: timeline, preview, panels, layout
+        // Note: the Xcode app target (DirectorsCut.xcodeproj) links against UI
+        // and provides the @main entry point — see docs/XcodeSetup.md
         .target(
             name: "UI",
             dependencies: ["Editor", "Render", "Effects", "Media", "Export", "AI"],
             path: "Sources/UI"
-        ),
-
-        // App entry point
-        .target(
-            name: "App",
-            dependencies: ["UI", "Editor", "Render", "Effects", "Media", "Export", "AI"],
-            path: "Sources/App"
         ),
 
         // Tests
