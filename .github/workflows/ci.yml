@@ -1,0 +1,71 @@
+name: CI
+
+on:
+  push:
+    branches: [main, "claude/**"]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ── Build & test the Swift Package on macOS ──────────────────────────────
+  swift-package:
+    name: Swift Package (macOS)
+    runs-on: macos-14         # Xcode 15, Apple Silicon runner
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select Xcode 15
+        run: sudo xcode-select -s /Applications/Xcode_15.4.app
+
+      - name: Cache SPM dependencies
+        uses: actions/cache@v4
+        with:
+          path: .build
+          key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
+          restore-keys: ${{ runner.os }}-spm-
+
+      - name: Build (Editor module)
+        run: swift build --target Editor -c release
+
+      - name: Build (Effects module)
+        run: swift build --target Effects -c release
+
+      - name: Build (Export module)
+        run: swift build --target Export -c release
+
+      - name: Run Editor tests
+        run: swift test --filter EditorTests
+
+      - name: Run Export tests
+        run: swift test --filter ExportTests
+
+  # ── Lint / format check ──────────────────────────────────────────────────
+  swift-lint:
+    name: SwiftLint
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install SwiftLint
+        run: brew install swiftlint
+
+      - name: Run SwiftLint
+        run: swiftlint lint --reporter github-actions-logging
+        continue-on-error: true   # warnings don't fail CI until rules are stable
+
+  # ── Build Xcode project for iOS Simulator ───────────────────────────────
+  # Uncomment once DirectorsCut.xcodeproj is added to the repo.
+  #
+  # xcode-ios:
+  #   name: Xcode Build (iOS Simulator)
+  #   runs-on: macos-14
+  #   steps:
+  #     - uses: actions/checkout@v4
+  #     - name: Build for Simulator
+  #       run: |
+  #         xcodebuild build \
+  #           -project DirectorsCut.xcodeproj \
+  #           -scheme DirectorsCut \
+  #           -destination 'platform=iOS Simulator,name=iPhone 15 Pro' \
+  #           CODE_SIGNING_ALLOWED=NO \
+  #           | xcpretty

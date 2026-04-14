@@ -1,7 +1,7 @@
 #if canImport(UIKit)
 import SwiftUI
 
-/// Root content view - delegates to the editor layout.
+/// Root content view — delegates to the main editor layout.
 public struct ContentView: View {
     public init() {}
 
