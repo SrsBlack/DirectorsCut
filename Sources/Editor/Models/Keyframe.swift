@@ -7,13 +7,24 @@ public struct Keyframe: Identifiable, Codable, Equatable {
     public var value: Double
     public var interpolation: Interpolation
 
-    public enum Interpolation: String, Codable, Equatable {
+    public enum Interpolation: String, Codable, Equatable, CaseIterable {
         case linear
         case easeIn
         case easeOut
         case easeInOut
         case hold     // instant jump, no interpolation
         case bezier
+
+        public var displayName: String {
+            switch self {
+            case .linear:    return "Linear"
+            case .easeIn:    return "Ease In"
+            case .easeOut:   return "Ease Out"
+            case .easeInOut: return "Ease In/Out"
+            case .bezier:    return "Bezier"
+            case .hold:      return "Hold"
+            }
+        }
     }
 
     public init(
@@ -65,7 +76,7 @@ public struct KeyframeTrack: Identifiable, Codable, Equatable {
     public var property: AnimatableProperty
     public var keyframes: [Keyframe]
 
-    public enum AnimatableProperty: String, Codable, Equatable {
+    public enum AnimatableProperty: String, Codable, Equatable, CaseIterable {
         case positionX
         case positionY
         case scaleX
@@ -73,6 +84,18 @@ public struct KeyframeTrack: Identifiable, Codable, Equatable {
         case rotation
         case opacity
         case volume
+
+        public var displayName: String {
+            switch self {
+            case .positionX: return "Position X"
+            case .positionY: return "Position Y"
+            case .scaleX:    return "Scale X"
+            case .scaleY:    return "Scale Y"
+            case .rotation:  return "Rotation"
+            case .opacity:   return "Opacity"
+            case .volume:    return "Volume"
+            }
+        }
     }
 
     public init(

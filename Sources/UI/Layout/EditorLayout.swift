@@ -6,11 +6,7 @@ public struct EditorLayout: View {
     @StateObject private var appState = AppState()
     @State private var showingImporter = false
     @State private var showingExport = false
-    @State private var activePanel: SidePanel = .media
-
-    enum SidePanel {
-        case media, properties, effects, ai
-    }
+    @State private var showingClipEditor = false
 
     public init() {}
 
@@ -32,11 +28,13 @@ public struct EditorLayout: View {
             EditorToolbar(
                 canUndo: appState.editHistory.canUndo,
                 canRedo: appState.editHistory.canRedo,
+                hasSelection: appState.selectedClipId != nil,
                 onUndo: { appState.undo() },
                 onRedo: { appState.redo() },
-                onSplit: { appState.timelineViewModel.splitAtPlayhead() },
-                onDelete: { appState.timelineViewModel.deleteSelectedClip() },
+                onSplit: { appState.splitSelectedClipAtPlayhead() },
+                onDelete: { appState.deleteSelectedClip() },
                 onImport: { showingImporter = true },
+                onEdit: { showingClipEditor = true },
                 onExport: { showingExport = true }
             )
 
@@ -50,6 +48,13 @@ public struct EditorLayout: View {
                 },
                 onTimeChanged: { time in
                     appState.previewPlayer.seek(to: time)
+                },
+                onClipMoved: { clipId, newStart in
+                    appState.moveClip(clipId, toTime: newStart)
+                },
+                onClipTrimmed: { clipId, edge, delta in
+                    let appEdge: AppState.TrimEdge = edge == .start ? .start : .end
+                    appState.trimClip(clipId, edge: appEdge, delta: delta)
                 }
             )
             .frame(height: 200)
@@ -72,6 +77,66 @@ public struct EditorLayout: View {
                 onDismiss: { showingExport = false }
             )
         }
+        .sheet(isPresented: $showingClipEditor) {
+            ClipEditorSheet(appState: appState)
+        }
+    }
+}
+
+/// Bottom-sheet on iPhone exposing properties + effects for the selected clip.
+struct ClipEditorSheet: View {
+    @ObservedObject var appState: AppState
+    @Environment(\.dismiss) private var dismiss
+    @State private var tab: Tab = .properties
+
+    enum Tab: String, CaseIterable {
+        case properties = "Properties"
+        case effects    = "Effects"
+        case ai         = "AI"
+    }
+
+    var body: some View {
+        NavigationView {
+            VStack(spacing: 0) {
+                Picker("", selection: $tab) {
+                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue).tag($0) }
+                }
+                .pickerStyle(.segmented)
+                .padding(8)
+
+                Divider()
+
+                switch tab {
+                case .properties:
+                    PropertiesPanel(
+                        clip: appState.selectedClip,
+                        onUpdate: { updated in appState.updateClip(updated) }
+                    )
+                case .effects:
+                    EffectListPanel(
+                        clip: appState.selectedClip,
+                        onAddEffect: { type in appState.addEffect(type) },
+                        onUpdateEffect: { _, updated in
+                            guard let cid = appState.selectedClipId else { return }
+                            appState.updateEffect(updated, on: cid)
+                        },
+                        onRemoveEffect: { effectId in
+                            guard let cid = appState.selectedClipId else { return }
+                            appState.removeEffect(effectId, from: cid)
+                        }
+                    )
+                case .ai:
+                    AIToolPanel()
+                }
+            }
+            .navigationTitle("Edit Clip")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Done") { dismiss() }
+                }
+            }
+        }
     }
 }
 
@@ -79,11 +144,13 @@ public struct EditorLayout: View {
 struct EditorToolbar: View {
     let canUndo: Bool
     let canRedo: Bool
+    let hasSelection: Bool
     let onUndo: () -> Void
     let onRedo: () -> Void
     let onSplit: () -> Void
     let onDelete: () -> Void
     let onImport: () -> Void
+    let onEdit: () -> Void
     let onExport: () -> Void
 
     var body: some View {
@@ -95,8 +162,9 @@ struct EditorToolbar: View {
                 Divider().frame(height: 24)
 
                 ToolbarButton(icon: "plus.rectangle", label: "Import", action: onImport)
-                ToolbarButton(icon: "scissors", label: "Split", action: onSplit)
-                ToolbarButton(icon: "trash", label: "Delete", action: onDelete)
+                ToolbarButton(icon: "scissors", label: "Split", isEnabled: hasSelection, action: onSplit)
+                ToolbarButton(icon: "slider.horizontal.3", label: "Edit", isEnabled: hasSelection, action: onEdit)
+                ToolbarButton(icon: "trash", label: "Delete", isEnabled: hasSelection, action: onDelete)
 
                 Divider().frame(height: 24)
 

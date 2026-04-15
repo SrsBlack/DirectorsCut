@@ -99,9 +99,17 @@ public struct EditorLayoutMac: View {
             case .effects:
                 EffectListPanel(
                     clip: selectedClip,
-                    onAddEffect: { _ in },
-                    onUpdateEffect: { _, _ in },
-                    onRemoveEffect: { _ in }
+                    onAddEffect: { type in
+                        appState.addEffect(type)
+                    },
+                    onUpdateEffect: { effectId, updated in
+                        guard let clipId = appState.selectedClipId else { return }
+                        appState.updateEffect(updated, on: clipId)
+                    },
+                    onRemoveEffect: { effectId in
+                        guard let clipId = appState.selectedClipId else { return }
+                        appState.removeEffect(effectId, from: clipId)
+                    }
                 )
             case .ai:
                 AIToolPanel()
@@ -134,7 +142,12 @@ public struct EditorLayoutMac: View {
             TimelineView(
                 viewModel: appState.timelineViewModel,
                 onClipSelected: { appState.selectedClipId = $0 },
-                onTimeChanged: { appState.previewPlayer.seek(to: $0) }
+                onTimeChanged:  { appState.previewPlayer.seek(to: $0) },
+                onClipMoved:    { appState.moveClip($0, toTime: $1) },
+                onClipTrimmed:  { id, edge, delta in
+                    let appEdge: AppState.TrimEdge = edge == .start ? .start : .end
+                    appState.trimClip(id, edge: appEdge, delta: delta)
+                }
             )
             .frame(height: 220)
         }
@@ -149,7 +162,9 @@ public struct EditorLayoutMac: View {
             VStack(spacing: 12) {
                 PropertiesPanel(
                     clip: selectedClip,
-                    onUpdate: { _ in }
+                    onUpdate: { updated in
+                        appState.updateClip(updated)
+                    }
                 )
                 Divider()
                 if let clip = selectedClip, !clip.keyframes.isEmpty {

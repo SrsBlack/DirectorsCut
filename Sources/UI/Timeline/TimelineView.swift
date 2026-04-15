@@ -3,19 +3,30 @@ import SwiftUI
 import UIKit
 
 /// The main timeline view backed by UIKit for performance-critical gestures.
+///
+/// All mutation events (move, trim, split, delete) are surfaced as callbacks
+/// so the parent (typically `AppState` via `EditorLayout`) is the single
+/// source of truth for the project — the ViewModel only holds display state
+/// (zoom, scroll, selection, current time).
 public struct TimelineView: View {
     @ObservedObject var viewModel: TimelineViewModel
     let onClipSelected: (UUID?) -> Void
-    let onTimeChanged: (Double) -> Void
+    let onTimeChanged:  (Double) -> Void
+    let onClipMoved:    (UUID, Double) -> Void
+    let onClipTrimmed:  (UUID, TimelineViewModel.TrimEdge, Double) -> Void
 
     public init(
         viewModel: TimelineViewModel,
         onClipSelected: @escaping (UUID?) -> Void = { _ in },
-        onTimeChanged: @escaping (Double) -> Void = { _ in }
+        onTimeChanged:  @escaping (Double) -> Void = { _ in },
+        onClipMoved:    @escaping (UUID, Double) -> Void = { _, _ in },
+        onClipTrimmed:  @escaping (UUID, TimelineViewModel.TrimEdge, Double) -> Void = { _, _, _ in }
     ) {
         self.viewModel = viewModel
         self.onClipSelected = onClipSelected
         self.onTimeChanged = onTimeChanged
+        self.onClipMoved = onClipMoved
+        self.onClipTrimmed = onClipTrimmed
     }
 
     public var body: some View {
@@ -43,10 +54,10 @@ public struct TimelineView: View {
                                     onClipSelected(clipId)
                                 },
                                 onClipDragged: { clipId, newStart in
-                                    viewModel.moveClip(clipId: clipId, toTime: newStart)
+                                    onClipMoved(clipId, newStart)
                                 },
                                 onClipTrimmed: { clipId, edge, delta in
-                                    viewModel.trimClip(clipId: clipId, edge: edge, delta: delta)
+                                    onClipTrimmed(clipId, edge, delta)
                                 }
                             )
                         }
@@ -76,7 +87,8 @@ public struct TimelineView: View {
     }
 }
 
-/// ViewModel for the timeline, managing state and edit operations.
+/// Display state for the timeline (zoom, scroll, selection, current time).
+/// Mutations to the underlying project happen on `AppState`, not here.
 @MainActor
 public final class TimelineViewModel: ObservableObject {
     @Published public var tracks: [Track] = []
@@ -86,103 +98,18 @@ public final class TimelineViewModel: ObservableObject {
     @Published public var scrollOffset: CGFloat = 0
     @Published public var selectedClipId: UUID?
 
-    private var timeline: Timeline
-    private let editHistory: EditHistory
-
-    public init(timeline: Timeline = .defaultTimeline(), editHistory: EditHistory = EditHistory()) {
-        self.timeline = timeline
-        self.editHistory = editHistory
+    public init(timeline: Timeline = .defaultTimeline()) {
         self.tracks = timeline.tracks
         self.duration = timeline.duration
     }
 
-    /// Update from a new timeline state
+    /// Refresh display state from a new timeline snapshot.
     public func update(from timeline: Timeline) {
-        self.timeline = timeline
         self.tracks = timeline.tracks
         self.duration = timeline.duration
     }
 
-    /// Move a clip to a new timeline position
-    public func moveClip(clipId: UUID, toTime newStart: Double) {
-        guard let (trackIdx, clipIdx) = timeline.findClip(id: clipId) else { return }
-        let clip = timeline.tracks[trackIdx].clips[clipIdx]
-        let oldStart = clip.timelineStart
-
-        let command = EditCommand.moveClip(
-            trackId: timeline.tracks[trackIdx].id,
-            clipId: clipId,
-            oldStart: oldStart,
-            newStart: max(0, newStart)
-        )
-
-        timeline.tracks[trackIdx].clips[clipIdx].timelineStart = max(0, newStart)
-        editHistory.record(command)
-        update(from: timeline)
-    }
-
-    /// Trim a clip from an edge
-    public func trimClip(clipId: UUID, edge: TrimEdge, delta: Double) {
-        guard let (trackIdx, clipIdx) = timeline.findClip(id: clipId) else { return }
-        let clip = timeline.tracks[trackIdx].clips[clipIdx]
-
-        switch edge {
-        case .start:
-            let newSourceStart = max(0, clip.sourceStartTime + delta * clip.speed)
-            let newDuration = max(0.1, clip.duration - delta)
-            let command = EditCommand.trimClipStart(
-                trackId: timeline.tracks[trackIdx].id,
-                clipId: clipId,
-                oldSourceStart: clip.sourceStartTime,
-                oldDuration: clip.duration,
-                newSourceStart: newSourceStart,
-                newDuration: newDuration
-            )
-            timeline.tracks[trackIdx].clips[clipIdx].sourceStartTime = newSourceStart
-            timeline.tracks[trackIdx].clips[clipIdx].timelineStart = clip.timelineStart + delta
-            timeline.tracks[trackIdx].clips[clipIdx].duration = newDuration
-            editHistory.record(command)
-
-        case .end:
-            let newDuration = max(0.1, min(clip.maxDuration, clip.duration + delta))
-            let command = EditCommand.trimClipEnd(
-                trackId: timeline.tracks[trackIdx].id,
-                clipId: clipId,
-                oldDuration: clip.duration,
-                newDuration: newDuration
-            )
-            timeline.tracks[trackIdx].clips[clipIdx].duration = newDuration
-            editHistory.record(command)
-        }
-
-        update(from: timeline)
-    }
-
-    /// Split the selected clip at the current playhead position
-    public func splitAtPlayhead() {
-        guard let clipId = selectedClipId,
-              let (trackIdx, _) = timeline.findClip(id: clipId) else { return }
-
-        if timeline.tracks[trackIdx].splitClip(id: clipId, at: currentTime) != nil {
-            update(from: timeline)
-        }
-    }
-
-    /// Delete the selected clip
-    public func deleteSelectedClip() {
-        guard let clipId = selectedClipId else { return }
-        for i in 0..<timeline.tracks.count {
-            if let clip = timeline.tracks[i].removeClip(id: clipId) {
-                let command = EditCommand.removeClip(trackId: timeline.tracks[i].id, clip: clip)
-                editHistory.record(command)
-                selectedClipId = nil
-                update(from: timeline)
-                return
-            }
-        }
-    }
-
-    /// Zoom in/out the timeline
+    /// Adjust zoom level.
     public func zoom(scale: Double) {
         pixelsPerSecond = max(20, min(300, pixelsPerSecond * scale))
     }

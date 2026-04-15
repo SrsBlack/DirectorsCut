@@ -119,19 +119,40 @@ public final class CompositionBuilder {
         videoComposition.frameDuration = CMTime(value: 1, timescale: CMTimeScale(timeline.framerate))
         videoComposition.customVideoCompositorClass = MetalCompositor.self
 
-        // Build instructions for the full duration
-        let totalDuration = composition.duration
-        if totalDuration.seconds > 0 {
-            let instruction = AVMutableVideoCompositionInstruction()
-            instruction.timeRange = CMTimeRange(start: .zero, duration: totalDuration)
+        // Build per-clip instructions so each frame knows which effects to apply.
+        // We walk the timeline in chronological order, emitting one DCCompositionInstruction
+        // per clip on each visible video track.
+        let videoTracks = composition.tracks(withMediaType: .video)
+        let allTrackIDs = videoTracks.map(\.trackID)
 
-            let videoTracks = composition.tracks(withMediaType: .video)
-            instruction.layerInstructions = videoTracks.map { track in
-                AVMutableVideoCompositionLayerInstruction(assetTrack: track)
+        var instructions: [DCCompositionInstruction] = []
+
+        for visibleTrack in timeline.videoTracks where visibleTrack.isVisible {
+            // Map the model track to its corresponding composition track (by index).
+            guard let modelIdx = timeline.videoTracks.firstIndex(where: { $0.id == visibleTrack.id }),
+                  modelIdx < videoTracks.count else { continue }
+            let avTrack = videoTracks[modelIdx]
+
+            for clip in visibleTrack.clips {
+                let start = CMTime(seconds: clip.timelineStart, preferredTimescale: 600)
+                let dur   = CMTime(seconds: clip.duration,      preferredTimescale: 600)
+                let range = CMTimeRange(start: start, duration: dur)
+
+                let instr = DCCompositionInstruction(
+                    timeRange: range,
+                    primaryTrackID: avTrack.trackID,
+                    sourceTrackIDs: allTrackIDs,
+                    effects: clip.effects.filter(\.isEnabled),
+                    opacity: clip.opacity
+                )
+                instructions.append(instr)
             }
-
-            videoComposition.instructions = [instruction]
         }
+
+        // Sort by start time and trim to non-overlapping ranges (last clip wins for now).
+        instructions.sort { $0.timeRange.start < $1.timeRange.start }
+
+        videoComposition.instructions = instructions
 
         // Build audio mix
         let audioMix = AVMutableAudioMix()

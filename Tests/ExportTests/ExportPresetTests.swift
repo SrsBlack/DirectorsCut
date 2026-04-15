@@ -1,4 +1,5 @@
 import XCTest
+import AVFoundation
 @testable import Export
 
 final class ExportPresetTests: XCTestCase {
@@ -33,7 +34,7 @@ final class ExportPresetTests: XCTestCase {
     func testVideoSettingsContainCodec() {
         let preset = ExportPreset.hd1080
         let settings = preset.videoSettings
-        XCTAssertNotNil(settings["AVVideoCodecKey" as String])
+        XCTAssertNotNil(settings[AVVideoCodecKey])
     }
 
     func testAudioSettingsContainFormat() {
@@ -42,5 +43,3 @@ final class ExportPresetTests: XCTestCase {
         XCTAssertNotNil(settings[AVFormatIDKey])
     }
 }
-
-import AVFoundation

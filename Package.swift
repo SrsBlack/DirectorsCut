@@ -93,5 +93,10 @@ let package = Package(
             dependencies: ["Export", "Editor", "Render"],
             path: "Tests/ExportTests"
         ),
+        .testTarget(
+            name: "EffectsTests",
+            dependencies: ["Effects", "Editor"],
+            path: "Tests/EffectsTests"
+        ),
     ]
 )

@@ -1,16 +1,30 @@
 import AVFoundation
 import Metal
 import CoreVideo
+import Effects
 
 /// Custom AVVideoCompositing implementation that uses Metal for GPU-accelerated
 /// frame compositing, effects, and transitions.
+///
+/// AVFoundation calls `startRequest(_:)` once per output frame.  We:
+///
+///   1. Acquire the source pixel buffer for the current track
+///   2. Read the per-clip effects from the request's
+///      `DCCompositionInstruction` (built by `CompositionBuilder`)
+///   3. Run each enabled effect through `FilterPipeline`, ping-ponging
+///      between two scratch textures
+///   4. Write the final result to the output pixel buffer
 public final class MetalCompositor: NSObject, AVVideoCompositing {
     private var device: MTLDevice?
     private var commandQueue: MTLCommandQueue?
     private var textureCache: CVMetalTextureCache?
-    private var pipelineState: MTLRenderPipelineState?
+    private var filterPipeline: FilterPipeline?
 
-    // MARK: - AVVideoCompositing Required Properties
+    /// Two reusable scratch textures for ping-pong rendering.
+    private var scratchA: MTLTexture?
+    private var scratchB: MTLTexture?
+
+    // MARK: - AVVideoCompositing required properties
 
     public var sourcePixelBufferAttributes: [String: Any]? {
         [
@@ -29,7 +43,7 @@ public final class MetalCompositor: NSObject, AVVideoCompositing {
     public var supportsWideColorSourceFrames: Bool { true }
     public var supportsHDRSourceFrames: Bool { true }
 
-    // MARK: - Initialization
+    // MARK: - Init
 
     override public init() {
         super.init()
@@ -45,159 +59,187 @@ public final class MetalCompositor: NSObject, AVVideoCompositing {
         CVMetalTextureCacheCreate(nil, nil, device, nil, &cache)
         self.textureCache = cache
 
-        setupPipeline(device: device)
-    }
-
-    private func setupPipeline(device: MTLDevice) {
-        // Load the default shader library
-        guard let library = try? device.makeDefaultLibrary(bundle: .module) else {
-            // Fallback: try to create a simple passthrough shader inline
-            let shaderSource = """
-            #include <metal_stdlib>
-            using namespace metal;
-
-            struct VertexOut {
-                float4 position [[position]];
-                float2 texCoord;
-            };
-
-            vertex VertexOut compositeVertex(uint vid [[vertex_id]]) {
-                float2 positions[] = {
-                    float2(-1, -1), float2(1, -1), float2(-1, 1),
-                    float2(-1, 1), float2(1, -1), float2(1, 1)
-                };
-                float2 texCoords[] = {
-                    float2(0, 1), float2(1, 1), float2(0, 0),
-                    float2(0, 0), float2(1, 1), float2(1, 0)
-                };
-                VertexOut out;
-                out.position = float4(positions[vid], 0, 1);
-                out.texCoord = texCoords[vid];
-                return out;
-            }
-
-            fragment float4 compositeFragment(VertexOut in [[stage_in]],
-                                              texture2d<float> tex [[texture(0)]]) {
-                constexpr sampler s(mag_filter::linear, min_filter::linear);
-                return tex.sample(s, in.texCoord);
-            }
-            """
-            guard let library = try? device.makeLibrary(source: shaderSource, options: nil) else { return }
-            createPipelineState(device: device, library: library)
-            return
-        }
-        createPipelineState(device: device, library: library)
-    }
-
-    private func createPipelineState(device: MTLDevice, library: MTLLibrary) {
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = library.makeFunction(name: "compositeVertex")
-        descriptor.fragmentFunction = library.makeFunction(name: "compositeFragment")
-        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        self.pipelineState = try? device.makeRenderPipelineState(descriptor: descriptor)
+        // Effects' FilterPipeline owns the .metal shaders bundled with the
+        // Effects target — it will load them via Bundle.module on its side.
+        self.filterPipeline = FilterPipeline()
     }
 
     // MARK: - AVVideoCompositing
 
     public func renderContextChanged(_ newRenderContext: AVVideoCompositionRenderContext) {
-        // Re-setup if render size changes
+        // Re-create scratch textures sized for the new render context.
+        guard let device else { return }
+        let size = newRenderContext.size
+        scratchA = makeScratch(device: device, width: Int(size.width), height: Int(size.height))
+        scratchB = makeScratch(device: device, width: Int(size.width), height: Int(size.height))
     }
 
     public func startRequest(_ request: AVAsynchronousVideoCompositionRequest) {
         autoreleasepool {
-            guard let device, let commandQueue else {
+            guard let device, let textureCache else {
                 request.finishCancelledRequest()
                 return
             }
 
-            // Get the output pixel buffer
+            // Allocate destination pixel buffer.
             guard let outputBuffer = request.renderContext.newPixelBuffer() else {
                 request.finishCancelledRequest()
                 return
             }
 
-            // Get source frames
-            let sourceTrackIDs = request.sourceTrackIDs
-            guard let firstTrackID = sourceTrackIDs.first,
-                  let sourceBuffer = request.sourceFrame(byTrackID: firstTrackID.int32Value) else {
-                // No source frames - fill with black
+            // Find the active source frame using the instruction (preferred)
+            // or fall back to the first source track.
+            let instruction = request.videoCompositionInstruction as? DCCompositionInstruction
+            let trackID = instruction?.primaryTrackID
+                ?? request.sourceTrackIDs.first?.int32Value
+                ?? kCMPersistentTrackID_Invalid
+
+            guard trackID != kCMPersistentTrackID_Invalid,
+                  let sourceBuffer = request.sourceFrame(byTrackID: trackID) else {
                 fillBlack(outputBuffer)
                 request.finish(withComposedVideoFrame: outputBuffer)
                 return
             }
 
-            // For now, simple passthrough of the first video track
-            // TODO: Apply effects, blend multiple tracks, handle transitions
-            if let pipelineState, let textureCache {
-                renderWithMetal(
-                    source: sourceBuffer,
-                    output: outputBuffer,
-                    device: device,
-                    commandQueue: commandQueue,
-                    pipelineState: pipelineState,
-                    textureCache: textureCache
-                )
-            } else {
+            // Build textures from buffers.
+            guard let sourceTex = makeTexture(from: sourceBuffer, cache: textureCache, device: device, write: false),
+                  let outputTex = makeTexture(from: outputBuffer, cache: textureCache, device: device, write: true)
+            else {
                 copyPixelBuffer(from: sourceBuffer, to: outputBuffer)
+                request.finish(withComposedVideoFrame: outputBuffer)
+                return
             }
+
+            // No effects → straight copy.
+            let effects = instruction?.effects ?? []
+            if effects.isEmpty || filterPipeline == nil {
+                copyPixelBuffer(from: sourceBuffer, to: outputBuffer)
+                request.finish(withComposedVideoFrame: outputBuffer)
+                return
+            }
+
+            // Apply the effect chain.  Read from sourceTex into scratchA,
+            // then ping-pong A↔B for each subsequent effect, finally write
+            // to outputTex.
+            applyEffectChain(
+                effects: effects,
+                input: sourceTex,
+                output: outputTex
+            )
 
             request.finish(withComposedVideoFrame: outputBuffer)
         }
     }
 
     public func cancelAllPendingVideoCompositionRequests() {
-        // Cancel in-flight work
+        // No queued state to cancel — each request is processed synchronously.
     }
 
-    // MARK: - Rendering
+    // MARK: - Effect chain dispatch
 
-    private func renderWithMetal(
-        source: CVPixelBuffer,
-        output: CVPixelBuffer,
-        device: MTLDevice,
-        commandQueue: MTLCommandQueue,
-        pipelineState: MTLRenderPipelineState,
-        textureCache: CVMetalTextureCache
+    /// Applies a list of effects from `input` → `output`, using `scratchA`/`scratchB`
+    /// to ping-pong intermediate results when there's more than one effect.
+    private func applyEffectChain(
+        effects: [Effect],
+        input: MTLTexture,
+        output: MTLTexture
     ) {
-        guard let sourceTexture = makeTexture(from: source, cache: textureCache, device: device),
-              let outputTexture = makeTexture(from: output, cache: textureCache, device: device),
-              let commandBuffer = commandQueue.makeCommandBuffer() else {
-            copyPixelBuffer(from: source, to: output)
+        guard let pipeline = filterPipeline else { return }
+        guard let scratchA, let scratchB else {
+            // No scratch yet → only safe to apply the first effect direct to output.
+            if let first = effects.first {
+                dispatch(pipeline: pipeline, effect: first, input: input, output: output)
+            }
             return
         }
 
-        let renderPassDescriptor = MTLRenderPassDescriptor()
-        renderPassDescriptor.colorAttachments[0].texture = outputTexture
-        renderPassDescriptor.colorAttachments[0].loadAction = .clear
-        renderPassDescriptor.colorAttachments[0].clearColor = MTLClearColor(red: 0, green: 0, blue: 0, alpha: 1)
-        renderPassDescriptor.colorAttachments[0].storeAction = .store
+        var current: MTLTexture = input
+        var nextScratch = scratchA
+        var otherScratch = scratchB
 
-        guard let encoder = commandBuffer.makeRenderCommandEncoder(descriptor: renderPassDescriptor) else {
-            copyPixelBuffer(from: source, to: output)
-            return
+        for (i, effect) in effects.enumerated() {
+            let isLast = (i == effects.count - 1)
+            let dst: MTLTexture = isLast ? output : nextScratch
+
+            dispatch(pipeline: pipeline, effect: effect, input: current, output: dst)
+
+            current = dst
+            // swap scratches
+            (nextScratch, otherScratch) = (otherScratch, nextScratch)
         }
-
-        encoder.setRenderPipelineState(pipelineState)
-        encoder.setFragmentTexture(sourceTexture, index: 0)
-        encoder.drawPrimitives(type: .triangle, vertexStart: 0, vertexCount: 6)
-        encoder.endEncoding()
-
-        commandBuffer.commit()
-        commandBuffer.waitUntilCompleted()
     }
 
-    private func makeTexture(from pixelBuffer: CVPixelBuffer, cache: CVMetalTextureCache, device: MTLDevice) -> MTLTexture? {
-        let width = CVPixelBufferGetWidth(pixelBuffer)
-        let height = CVPixelBufferGetHeight(pixelBuffer)
+    /// Dispatch a single effect via the FilterPipeline.
+    private func dispatch(pipeline: FilterPipeline, effect: Effect, input: MTLTexture, output: MTLTexture) {
+        switch effect.type {
+        case .colorCorrection, .colorGrading:
+            pipeline.applyColorCorrection(
+                input: input,
+                output: output,
+                brightness:  effect.parameters["brightness"]?.floatValue  ?? 0,
+                contrast:    effect.parameters["contrast"]?.floatValue    ?? 1,
+                saturation:  effect.parameters["saturation"]?.floatValue  ?? 1,
+                temperature: effect.parameters["temperature"]?.floatValue ?? 6500,
+                tint:        effect.parameters["tint"]?.floatValue        ?? 0,
+                exposure:    effect.parameters["exposure"]?.floatValue    ?? 0,
+                highlights:  effect.parameters["highlights"]?.floatValue  ?? 0,
+                shadows:     effect.parameters["shadows"]?.floatValue     ?? 0
+            )
+        default:
+            // For now, unknown / unimplemented effects pass through.
+            // (Phase 2 will add chroma key, blur, vignette, LUT dispatchers.)
+            blitCopy(input: input, output: output)
+        }
+    }
 
-        var metalTexture: CVMetalTexture?
+    // MARK: - Helpers
+
+    private func makeTexture(
+        from pixelBuffer: CVPixelBuffer,
+        cache: CVMetalTextureCache,
+        device: MTLDevice,
+        write: Bool
+    ) -> MTLTexture? {
+        let w = CVPixelBufferGetWidth(pixelBuffer)
+        let h = CVPixelBufferGetHeight(pixelBuffer)
+        var metalTex: CVMetalTexture?
         let status = CVMetalTextureCacheCreateTextureFromImage(
             nil, cache, pixelBuffer, nil,
-            .bgra8Unorm, width, height, 0, &metalTexture
+            .bgra8Unorm, w, h, 0, &metalTex
         )
+        guard status == kCVReturnSuccess, let metalTex else { return nil }
+        return CVMetalTextureGetTexture(metalTex)
+    }
 
-        guard status == kCVReturnSuccess, let metalTexture else { return nil }
-        return CVMetalTextureGetTexture(metalTexture)
+    private func makeScratch(device: MTLDevice, width: Int, height: Int) -> MTLTexture? {
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .bgra8Unorm,
+            width: width,
+            height: height,
+            mipmapped: false
+        )
+        desc.usage = [.shaderRead, .shaderWrite]
+        return device.makeTexture(descriptor: desc)
+    }
+
+    private func blitCopy(input: MTLTexture, output: MTLTexture) {
+        guard let device, let queue = commandQueue,
+              let cmd = queue.makeCommandBuffer(),
+              let blit = cmd.makeBlitCommandEncoder() else { return }
+        _ = device // silence unused-warning when device captured but not used directly
+        let size = MTLSize(width: min(input.width, output.width),
+                           height: min(input.height, output.height),
+                           depth: 1)
+        blit.copy(
+            from: input,  sourceSlice: 0, sourceLevel: 0,
+            sourceOrigin: MTLOrigin(x: 0, y: 0, z: 0),
+            sourceSize: size,
+            to: output, destinationSlice: 0, destinationLevel: 0,
+            destinationOrigin: MTLOrigin(x: 0, y: 0, z: 0)
+        )
+        blit.endEncoding()
+        cmd.commit()
+        cmd.waitUntilCompleted()
     }
 
     private func fillBlack(_ buffer: CVPixelBuffer) {
@@ -216,11 +258,10 @@ public final class MetalCompositor: NSObject, AVVideoCompositing {
             CVPixelBufferUnlockBaseAddress(source, .readOnly)
             CVPixelBufferUnlockBaseAddress(dest, [])
         }
-
-        if let srcBase = CVPixelBufferGetBaseAddress(source),
-           let dstBase = CVPixelBufferGetBaseAddress(dest) {
+        if let s = CVPixelBufferGetBaseAddress(source),
+           let d = CVPixelBufferGetBaseAddress(dest) {
             let size = min(CVPixelBufferGetDataSize(source), CVPixelBufferGetDataSize(dest))
-            memcpy(dstBase, srcBase, size)
+            memcpy(d, s, size)
         }
     }
 }

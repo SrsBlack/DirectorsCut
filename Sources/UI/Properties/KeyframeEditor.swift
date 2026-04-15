@@ -142,36 +142,4 @@ private struct KeyframeRow: View {
     }
 }
 
-// MARK: - Display name helpers
-
-extension KeyframeTrack.AnimatableProperty {
-    public var displayName: String {
-        switch self {
-        case .positionX:  return "Position X"
-        case .positionY:  return "Position Y"
-        case .scaleX:     return "Scale X"
-        case .scaleY:     return "Scale Y"
-        case .rotation:   return "Rotation"
-        case .opacity:    return "Opacity"
-        case .volume:     return "Volume"
-        }
-    }
-}
-
-extension Keyframe.Interpolation: CaseIterable {
-    public static let allCases: [Keyframe.Interpolation] = [
-        .linear, .easeIn, .easeOut, .easeInOut, .bezier, .hold
-    ]
-
-    public var displayName: String {
-        switch self {
-        case .linear:     return "Linear"
-        case .easeIn:     return "Ease In"
-        case .easeOut:    return "Ease Out"
-        case .easeInOut:  return "Ease In/Out"
-        case .bezier:     return "Bezier"
-        case .hold:       return "Hold"
-        }
-    }
-}
 #endif

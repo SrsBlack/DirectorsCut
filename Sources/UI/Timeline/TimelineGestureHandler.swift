@@ -38,32 +38,4 @@ public final class TimelineGestureHandler {
     }
 }
 
-/// Haptic feedback helper for timeline interactions
-public struct HapticFeedbackHelper {
-    private static let impactLight = UIImpactFeedbackGenerator(style: .light)
-    private static let impactMedium = UIImpactFeedbackGenerator(style: .medium)
-    private static let selection = UISelectionFeedbackGenerator()
-
-    /// Snap feedback - light haptic
-    public static func snap() {
-        impactLight.impactOccurred()
-    }
-
-    /// Selection feedback
-    public static func select() {
-        selection.selectionChanged()
-    }
-
-    /// Split feedback - medium haptic
-    public static func split() {
-        impactMedium.impactOccurred()
-    }
-
-    /// Prepare generators for upcoming interactions
-    public static func prepare() {
-        impactLight.prepare()
-        impactMedium.prepare()
-        selection.prepare()
-    }
-}
 #endif

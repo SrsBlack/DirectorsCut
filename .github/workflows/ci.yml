@@ -24,20 +24,11 @@ jobs:
           key: ${{ runner.os }}-spm-${{ hashFiles('Package.swift', 'Package.resolved') }}
           restore-keys: ${{ runner.os }}-spm-
 
-      - name: Build (Editor module)
-        run: swift build --target Editor -c release
+      - name: Build all targets
+        run: swift build -c debug
 
-      - name: Build (Effects module)
-        run: swift build --target Effects -c release
-
-      - name: Build (Export module)
-        run: swift build --target Export -c release
-
-      - name: Run Editor tests
-        run: swift test --filter EditorTests
-
-      - name: Run Export tests
-        run: swift test --filter ExportTests
+      - name: Run all tests
+        run: swift test --parallel
 
   # ── Lint / format check ──────────────────────────────────────────────────
   swift-lint:
