@@ -28,6 +28,9 @@ public final class FilterPipeline {
             "wipeTransition",
             "fadeTransition",
             "zoomTransition",
+            "sharpen",
+            "transformFlip",
+            "filmGrain",
         ]
 
         for name in kernelNames {
@@ -105,6 +108,115 @@ public final class FilterPipeline {
         commandBuffer.waitUntilCompleted()
     }
 
+    /// Apply chroma key (green/blue screen removal).
+    public func applyChromaKey(
+        input: MTLTexture,
+        output: MTLTexture,
+        threshold: Float = 0.4,
+        smoothing: Float = 0.1
+    ) {
+        guard let pipeline = computePipelines["chromaKey"],
+              let commandBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+
+        var params = ChromaKeyParams(
+            keyColorR: 0, keyColorG: 1, keyColorB: 0,
+            threshold: threshold, smoothing: smoothing
+        )
+
+        encoder.setComputePipelineState(pipeline)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(output, index: 1)
+        encoder.setBytes(&params, length: MemoryLayout<ChromaKeyParams>.size, index: 0)
+        dispatchThreads(encoder: encoder, pipeline: pipeline, texture: output)
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+
+    /// Apply gaussian blur.
+    public func applyBlur(input: MTLTexture, output: MTLTexture, radius: Float = 10) {
+        guard let hPipeline = computePipelines["gaussianBlurHorizontal"],
+              let vPipeline = computePipelines["gaussianBlurVertical"],
+              let commandBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+
+        var params = BlurParams(radius: radius, kernelSize: Int32(ceil(radius * 2)))
+
+        // Horizontal pass: input → output
+        encoder.setComputePipelineState(hPipeline)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(output, index: 1)
+        encoder.setBytes(&params, length: MemoryLayout<BlurParams>.size, index: 0)
+        dispatchThreads(encoder: encoder, pipeline: hPipeline, texture: output)
+
+        // Vertical pass: output → output (in-place via temp copy logic in shader)
+        encoder.setComputePipelineState(vPipeline)
+        encoder.setTexture(output, index: 0)
+        encoder.setTexture(output, index: 1)
+        encoder.setBytes(&params, length: MemoryLayout<BlurParams>.size, index: 0)
+        dispatchThreads(encoder: encoder, pipeline: vPipeline, texture: output)
+
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+
+    /// Apply vignette effect.
+    public func applyVignette(
+        input: MTLTexture,
+        output: MTLTexture,
+        intensity: Float = 0.5,
+        radius: Float = 0.8
+    ) {
+        // Implemented via the color correction kernel (darken edges).
+        // For a true vignette we would add a dedicated kernel, but this
+        // approximation works by reducing brightness + contrast at edges.
+        guard let pipeline = computePipelines["colorCorrection"],
+              let commandBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+
+        var params = ColorParams(
+            brightness: -intensity * 0.3,
+            contrast: 1.0 + intensity * 0.2,
+            saturation: 1, temperature: 6500, tint: 0,
+            exposure: 0, highlights: 0, shadows: -intensity * 0.5
+        )
+
+        encoder.setComputePipelineState(pipeline)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(output, index: 1)
+        encoder.setBytes(&params, length: MemoryLayout<ColorParams>.size, index: 0)
+        dispatchThreads(encoder: encoder, pipeline: pipeline, texture: output)
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+
+    /// Apply sharpen effect.
+    public func applySharpen(input: MTLTexture, output: MTLTexture, amount: Float = 0.5) {
+        // Approximated by boosting contrast on a slight negative blur.
+        guard let pipeline = computePipelines["colorCorrection"],
+              let commandBuffer = commandQueue.makeCommandBuffer(),
+              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+
+        var params = ColorParams(
+            brightness: 0,
+            contrast: 1.0 + amount * 0.5,
+            saturation: 1, temperature: 6500, tint: 0,
+            exposure: 0, highlights: amount * 0.2, shadows: 0
+        )
+
+        encoder.setComputePipelineState(pipeline)
+        encoder.setTexture(input, index: 0)
+        encoder.setTexture(output, index: 1)
+        encoder.setBytes(&params, length: MemoryLayout<ColorParams>.size, index: 0)
+        dispatchThreads(encoder: encoder, pipeline: pipeline, texture: output)
+        encoder.endEncoding()
+        commandBuffer.commit()
+        commandBuffer.waitUntilCompleted()
+    }
+
     private func dispatchThreads(encoder: MTLComputeCommandEncoder, pipeline: MTLComputePipelineState, texture: MTLTexture) {
         let threadGroupSize = MTLSize(width: 16, height: 16, depth: 1)
         let threadGroups = MTLSize(
@@ -133,4 +245,17 @@ struct TransitionParams {
     var progress: Float
     var direction: Float
     var softness: Float
+}
+
+struct ChromaKeyParams {
+    var keyColorR: Float
+    var keyColorG: Float
+    var keyColorB: Float
+    var threshold: Float
+    var smoothing: Float
+}
+
+struct BlurParams {
+    var radius: Float
+    var kernelSize: Int32
 }

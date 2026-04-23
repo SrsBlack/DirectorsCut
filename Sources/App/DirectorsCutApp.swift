@@ -1,31 +1,27 @@
 #if canImport(UIKit)
 import SwiftUI
 
-// NOTE: This file is used by the Xcode app target (DirectorsCut.xcodeproj).
-// The @main entry point is declared in the Xcode target, not here.
+// The Xcode app target provides the @main entry point.
 // See docs/XcodeSetup.md for how to wire this up.
+//
+// Paste this into the Xcode target's entry point file:
+//
+//     import SwiftUI
+//     import UI
+//
+//     @main
+//     struct DirectorsCutApp: App {
+//         var body: some Scene {
+//             WindowGroup {
+//                 ContentView()
+//             }
+//         }
+//     }
 
-/// Root SwiftUI scene for Directors Cut.
-/// The Xcode app target declares @main and calls this.
-///
-/// Example Xcode entry point (paste into DirectorsCutApp.swift in Xcode target):
-///
-///     import SwiftUI
-///     import UI
-///
-///     @main
-///     struct DirectorsCutApp: App {
-///         var body: some Scene {
-///             WindowGroup {
-///                 EditorLayout()
-///                     .preferredColorScheme(.dark)
-///             }
-///         }
-///     }
+/// Helper that returns the root view for the Xcode app target.
 public struct DirectorsCutScene {
     public static func makeRootView() -> some View {
-        EditorLayout()
-            .preferredColorScheme(.dark)
+        ContentView()
     }
 }
 #endif

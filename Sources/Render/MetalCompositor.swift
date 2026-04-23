@@ -185,9 +185,50 @@ public final class MetalCompositor: NSObject, AVVideoCompositing {
                 highlights:  effect.parameters["highlights"]?.floatValue  ?? 0,
                 shadows:     effect.parameters["shadows"]?.floatValue     ?? 0
             )
-        default:
-            // For now, unknown / unimplemented effects pass through.
-            // (Phase 2 will add chroma key, blur, vignette, LUT dispatchers.)
+
+        case .gaussianBlur, .motionBlur:
+            pipeline.applyBlur(
+                input: input,
+                output: output,
+                radius: effect.parameters["radius"]?.floatValue ?? 10
+            )
+
+        case .chromaKey:
+            pipeline.applyChromaKey(
+                input: input,
+                output: output,
+                threshold: effect.parameters["threshold"]?.floatValue ?? 0.4,
+                smoothing: effect.parameters["smoothing"]?.floatValue ?? 0.1
+            )
+
+        case .vignette:
+            pipeline.applyVignette(
+                input: input,
+                output: output,
+                intensity: effect.parameters["intensity"]?.floatValue ?? 0.5,
+                radius: effect.parameters["radius"]?.floatValue ?? 0.8
+            )
+
+        case .saturation:
+            pipeline.applyColorCorrection(
+                input: input, output: output,
+                saturation: effect.parameters["saturation"]?.floatValue ?? 1
+            )
+
+        case .temperature:
+            pipeline.applyColorCorrection(
+                input: input, output: output,
+                temperature: effect.parameters["temperature"]?.floatValue ?? 6500
+            )
+
+        case .sharpen:
+            pipeline.applySharpen(
+                input: input,
+                output: output,
+                amount: effect.parameters["amount"]?.floatValue ?? 0.5
+            )
+
+        case .flip, .mirror, .crop, .filmGrain, .lut:
             blitCopy(input: input, output: output)
         }
     }

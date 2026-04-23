@@ -7,6 +7,7 @@ import Combine
 public final class AppState: ObservableObject {
     @Published public var project: Project
     @Published public var selectedClipId: UUID?
+    @Published public var isEditorActive = false
 
     public let editHistory = EditHistory()
     public let previewPlayer = PreviewPlayer()
@@ -21,11 +22,10 @@ public final class AppState: ObservableObject {
         let project = Project()
         self.project = project
         self.timelineViewModel = TimelineViewModel(timeline: project.timeline)
-
         setupAutosave()
     }
 
-    /// The currently selected clip (computed from selectedClipId), if any.
+    /// The currently selected clip, if any.
     public var selectedClip: Clip? {
         guard let id = selectedClipId,
               let (ti, ci) = project.timeline.findClip(id: id) else { return nil }
@@ -37,6 +37,40 @@ public final class AppState: ObservableObject {
         guard let id = selectedClipId,
               let (ti, _) = project.timeline.findClip(id: id) else { return nil }
         return project.timeline.tracks[ti].id
+    }
+
+    // MARK: - Project lifecycle
+
+    /// Open an existing project from disk.
+    public func openProject(from url: URL) {
+        do {
+            project = try ProjectFile.load(from: url)
+            projectURL = url
+            editHistory.clear()
+            selectedClipId = nil
+            syncTimeline()
+            rebuildComposition()
+            isEditorActive = true
+        } catch {
+            // If load fails, stay on the browser
+        }
+    }
+
+    /// Start editing a brand-new project.
+    public func startNewProject(_ proj: Project) {
+        project = proj
+        projectURL = nil
+        editHistory.clear()
+        selectedClipId = nil
+        syncTimeline()
+        isEditorActive = true
+    }
+
+    /// Close the current project and return to the browser.
+    public func closeProject() {
+        save()
+        isEditorActive = false
+        selectedClipId = nil
     }
 
     /// Add a clip from a media asset to the first video or audio track
@@ -70,23 +104,7 @@ public final class AppState: ObservableObject {
         rebuildComposition()
     }
 
-    /// Undo the last edit
-    public func undo() {
-        guard let command = editHistory.popUndo() else { return }
-        apply(command)
-        syncTimeline()
-        rebuildComposition()
-    }
-
-    /// Redo the last undone edit
-    public func redo() {
-        guard let command = editHistory.popRedo() else { return }
-        apply(command)
-        syncTimeline()
-        rebuildComposition()
-    }
-
-    // MARK: - Timeline mutation API (called from the timeline UI)
+    // MARK: - Timeline mutation API
 
     /// Move a clip to a new timeline position.
     public func moveClip(_ clipId: UUID, toTime newStart: Double) {
@@ -103,7 +121,7 @@ public final class AppState: ObservableObject {
         rebuildComposition()
     }
 
-    /// Trim a clip from one of its edges by the given time delta.
+    /// Trim a clip from one of its edges.
     public func trimClip(_ clipId: UUID, edge: TrimEdge, delta: Double) {
         guard let (ti, ci) = project.timeline.findClip(id: clipId) else { return }
         let trackId = project.timeline.tracks[ti].id
@@ -134,7 +152,7 @@ public final class AppState: ObservableObject {
         rebuildComposition()
     }
 
-    /// Split the currently selected clip at the current playhead time.
+    /// Split the selected clip at the playhead.
     public func splitSelectedClipAtPlayhead() {
         guard let clipId = selectedClipId,
               let (ti, _) = project.timeline.findClip(id: clipId) else { return }
@@ -142,27 +160,25 @@ public final class AppState: ObservableObject {
             .first(where: { $0.id == clipId })
 
         guard let originalClip,
-              let (first, second) = project.timeline.tracks[ti].splitClip(id: clipId, at: previewPlayer.currentTime)
+              let (first, second) = project.timeline.tracks[ti]
+                .splitClip(id: clipId, at: previewPlayer.currentTime)
         else { return }
 
         editHistory.record(.splitClip(
             trackId: project.timeline.tracks[ti].id,
-            originalClip: originalClip,
-            firstHalf: first,
-            secondHalf: second
+            originalClip: originalClip, firstHalf: first, secondHalf: second
         ))
         project.markModified()
         syncTimeline()
         rebuildComposition()
     }
 
-    /// Delete the currently selected clip from its track.
+    /// Delete the selected clip.
     public func deleteSelectedClip() {
         guard let clipId = selectedClipId else { return }
         for ti in 0..<project.timeline.tracks.count {
             if let removed = project.timeline.tracks[ti].removeClip(id: clipId) {
-                let trackId = project.timeline.tracks[ti].id
-                editHistory.record(.removeClip(trackId: trackId, clip: removed))
+                editHistory.record(.removeClip(trackId: project.timeline.tracks[ti].id, clip: removed))
                 selectedClipId = nil
                 project.markModified()
                 syncTimeline()
@@ -172,14 +188,11 @@ public final class AppState: ObservableObject {
         }
     }
 
-    public enum TrimEdge {
-        case start, end
-    }
+    public enum TrimEdge { case start, end }
 
-    // MARK: - Clip mutation API (called from the UI)
+    // MARK: - Clip property mutations
 
     /// Replace the selected clip's properties (volume, opacity, speed, etc.)
-    /// Records the appropriate undo command for whichever fields changed.
     public func updateClip(_ updated: Clip) {
         guard let (ti, ci) = project.timeline.findClip(id: updated.id) else { return }
         let trackId = project.timeline.tracks[ti].id
@@ -200,22 +213,18 @@ public final class AppState: ObservableObject {
                                           oldDuration: old.duration, newDuration: updated.duration))
         }
 
-        // Apply the new state directly (covers fields without dedicated commands)
         project.timeline.tracks[ti].clips[ci] = updated
-
-        // Record undo
         switch commands.count {
-        case 0:  break // nothing tracked, just a passive update
+        case 0:  break
         case 1:  editHistory.record(commands[0])
         default: editHistory.record(.batch(commands: commands, description: "Update Clip"))
         }
-
         project.markModified()
         syncTimeline()
         rebuildComposition()
     }
 
-    /// Add an effect to the selected clip (or a specific clip).
+    /// Add an effect to the selected clip.
     public func addEffect(_ type: Effect.EffectType, to clipId: UUID? = nil) {
         let id = clipId ?? selectedClipId
         guard let id, let (ti, ci) = project.timeline.findClip(id: id) else { return }
@@ -237,7 +246,7 @@ public final class AppState: ObservableObject {
         rebuildComposition()
     }
 
-    /// Remove an effect by its ID from the given clip.
+    /// Remove an effect from a clip.
     public func removeEffect(_ effectId: UUID, from clipId: UUID) {
         guard let (ti, ci) = project.timeline.findClip(id: clipId),
               let eIdx = project.timeline.tracks[ti].clips[ci].effects.firstIndex(where: { $0.id == effectId })
@@ -250,7 +259,7 @@ public final class AppState: ObservableObject {
         rebuildComposition()
     }
 
-    /// Update the parameters of an existing effect on a clip.
+    /// Update effect parameters on a clip.
     public func updateEffect(_ updated: Effect, on clipId: UUID) {
         guard let (ti, ci) = project.timeline.findClip(id: clipId),
               let eIdx = project.timeline.tracks[ti].clips[ci].effects.firstIndex(where: { $0.id == updated.id })
@@ -264,15 +273,13 @@ public final class AppState: ObservableObject {
         rebuildComposition()
     }
 
-    /// Add a transition between two adjacent clips.
+    /// Add a transition between two clips.
     public func addTransition(_ transition: Transition, from fromClipId: UUID, to toClipId: UUID) {
         guard let (ti, _) = project.timeline.findClip(id: fromClipId) else { return }
         let trackId = project.timeline.tracks[ti].id
         let entry = Timeline.TransitionEntry(
-            transition: transition,
-            fromClipId: fromClipId,
-            toClipId: toClipId,
-            trackId: trackId
+            transition: transition, fromClipId: fromClipId,
+            toClipId: toClipId, trackId: trackId
         )
         project.timeline.addTransition(entry)
         editHistory.record(.addTransition(entry: entry))
@@ -281,9 +288,36 @@ public final class AppState: ObservableObject {
         rebuildComposition()
     }
 
+    /// Change the project's aspect ratio / resolution.
+    public func setAspectRatio(_ preset: Project.AspectRatioPreset) {
+        let oldRes = project.timeline.resolution
+        let newRes = preset.resolution
+        project.aspectRatioPreset = preset
+        project.timeline.resolution = newRes
+        editHistory.record(.setResolution(old: oldRes, new: newRes))
+        project.markModified()
+        syncTimeline()
+        rebuildComposition()
+    }
+
+    // MARK: - Undo / Redo
+
+    public func undo() {
+        guard let command = editHistory.popUndo() else { return }
+        apply(command)
+        syncTimeline()
+        rebuildComposition()
+    }
+
+    public func redo() {
+        guard let command = editHistory.popRedo() else { return }
+        apply(command)
+        syncTimeline()
+        rebuildComposition()
+    }
+
     // MARK: - Export
 
-    /// Export the current project
     public func export(preset: ExportPreset) async throws -> URL {
         let result = try await CompositionBuilder.build(from: project.timeline)
         let outputURL = ExportEngine.temporaryOutputURL(preset: preset)
@@ -291,20 +325,12 @@ public final class AppState: ObservableObject {
         return outputURL
     }
 
-    /// Save the current project
+    // MARK: - Persistence
+
     public func save() {
         let url = projectURL ?? ProjectFile.urlForNewProject(named: project.name)
         projectURL = url
         try? ProjectFile.save(project, to: url)
-    }
-
-    /// Load a project from a URL
-    public func load(from url: URL) throws {
-        project = try ProjectFile.load(from: url)
-        projectURL = url
-        editHistory.clear()
-        syncTimeline()
-        rebuildComposition()
     }
 
     // MARK: - Private
@@ -320,42 +346,35 @@ public final class AppState: ObservableObject {
             project.timeline.tracks[idx].removeClip(id: clip.id)
 
         case .moveClip(let trackId, let clipId, _, let newStart):
-            guard let tIdx = project.timeline.tracks.firstIndex(where: { $0.id == trackId }),
-                  let cIdx = project.timeline.tracks[tIdx].clipIndex(id: clipId) else { return }
-            project.timeline.tracks[tIdx].clips[cIdx].timelineStart = newStart
+            guard let (ti, ci) = locate(trackId: trackId, clipId: clipId) else { return }
+            project.timeline.tracks[ti].clips[ci].timelineStart = newStart
 
         case .trimClipStart(let trackId, let clipId, _, _, let newSourceStart, let newDuration):
-            guard let tIdx = project.timeline.tracks.firstIndex(where: { $0.id == trackId }),
-                  let cIdx = project.timeline.tracks[tIdx].clipIndex(id: clipId) else { return }
-            project.timeline.tracks[tIdx].clips[cIdx].sourceStartTime = newSourceStart
-            project.timeline.tracks[tIdx].clips[cIdx].duration = newDuration
+            guard let (ti, ci) = locate(trackId: trackId, clipId: clipId) else { return }
+            project.timeline.tracks[ti].clips[ci].sourceStartTime = newSourceStart
+            project.timeline.tracks[ti].clips[ci].duration = newDuration
 
         case .trimClipEnd(let trackId, let clipId, _, let newDuration):
-            guard let tIdx = project.timeline.tracks.firstIndex(where: { $0.id == trackId }),
-                  let cIdx = project.timeline.tracks[tIdx].clipIndex(id: clipId) else { return }
-            project.timeline.tracks[tIdx].clips[cIdx].duration = newDuration
+            guard let (ti, ci) = locate(trackId: trackId, clipId: clipId) else { return }
+            project.timeline.tracks[ti].clips[ci].duration = newDuration
 
         case .setClipSpeed(let trackId, let clipId, _, let newSpeed, _, let newDuration):
-            guard let tIdx = project.timeline.tracks.firstIndex(where: { $0.id == trackId }),
-                  let cIdx = project.timeline.tracks[tIdx].clipIndex(id: clipId) else { return }
-            project.timeline.tracks[tIdx].clips[cIdx].speed = newSpeed
-            project.timeline.tracks[tIdx].clips[cIdx].duration = newDuration
+            guard let (ti, ci) = locate(trackId: trackId, clipId: clipId) else { return }
+            project.timeline.tracks[ti].clips[ci].speed = newSpeed
+            project.timeline.tracks[ti].clips[ci].duration = newDuration
 
         case .setClipVolume(let trackId, let clipId, _, let newVolume):
-            guard let tIdx = project.timeline.tracks.firstIndex(where: { $0.id == trackId }),
-                  let cIdx = project.timeline.tracks[tIdx].clipIndex(id: clipId) else { return }
-            project.timeline.tracks[tIdx].clips[cIdx].volume = newVolume
+            guard let (ti, ci) = locate(trackId: trackId, clipId: clipId) else { return }
+            project.timeline.tracks[ti].clips[ci].volume = newVolume
 
         case .setClipOpacity(let trackId, let clipId, _, let newOpacity):
-            guard let tIdx = project.timeline.tracks.firstIndex(where: { $0.id == trackId }),
-                  let cIdx = project.timeline.tracks[tIdx].clipIndex(id: clipId) else { return }
-            project.timeline.tracks[tIdx].clips[cIdx].opacity = newOpacity
+            guard let (ti, ci) = locate(trackId: trackId, clipId: clipId) else { return }
+            project.timeline.tracks[ti].clips[ci].opacity = newOpacity
 
         case .addTrack(let track):
             project.timeline.addTrack(track)
 
         case .removeTrack(let track, _):
-            // Find the actual index by ID rather than relying on stored index
             if let idx = project.timeline.tracks.firstIndex(where: { $0.id == track.id }) {
                 project.timeline.tracks.remove(at: idx)
             }
@@ -376,7 +395,6 @@ public final class AppState: ObservableObject {
 
         case .splitClip(let trackId, _, let firstHalf, let secondHalf):
             guard let ti = project.timeline.tracks.firstIndex(where: { $0.id == trackId }) else { return }
-            // Replace original with two halves (called via redo)
             if let idx = project.timeline.tracks[ti].clipIndex(id: firstHalf.id) {
                 project.timeline.tracks[ti].clips[idx] = firstHalf
             } else {
@@ -407,15 +425,11 @@ public final class AppState: ObservableObject {
             project.timeline.framerate = new
 
         case .batch(let commands, _):
-            for cmd in commands {
-                apply(cmd)
-            }
+            for cmd in commands { apply(cmd) }
         }
-
         project.markModified()
     }
 
-    /// Look up a (trackIndex, clipIndex) by IDs.
     private func locate(trackId: UUID, clipId: UUID) -> (Int, Int)? {
         guard let ti = project.timeline.tracks.firstIndex(where: { $0.id == trackId }),
               let ci = project.timeline.tracks[ti].clipIndex(id: clipId) else { return nil }
