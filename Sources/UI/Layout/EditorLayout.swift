@@ -277,7 +277,7 @@ struct MediaImporterSheet: View {
             MediaBrowserView(
                 mediaLibrary: mediaLibrary,
                 onAssetSelected: { onAssetImported($0); dismiss() },
-                onImportTapped: {}
+                onImportTapped: { showingImporter = true }
             )
             .navigationTitle("Import Media")
             .navigationBarTitleDisplayMode(.inline)

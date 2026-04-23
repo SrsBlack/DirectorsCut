@@ -10,6 +10,7 @@ import AI
 public struct EditorLayoutMac: View {
     @ObservedObject var appState: AppState
     @State private var showingExport = false
+    @State private var showingImporter = false
     @State private var showingTextEditor = false
     @State private var editingTextClip = TextClip()
     @State private var sidebarSelection: SidebarTab = .media
@@ -112,7 +113,7 @@ public struct EditorLayoutMac: View {
                 MediaBrowserView(
                     mediaLibrary: appState.mediaLibrary,
                     onAssetSelected: { appState.addClipFromAsset($0) },
-                    onImportTapped: {}
+                    onImportTapped: { showingImporter = true }
                 )
             case .effects:
                 EffectListPanel(
