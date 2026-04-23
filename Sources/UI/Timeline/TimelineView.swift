@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Editor
 import UIKit
 
 /// The main timeline view backed by UIKit for performance-critical gestures.

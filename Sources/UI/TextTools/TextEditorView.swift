@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Editor
 
 /// Full-screen text editor for creating and styling text overlays.
 public struct TextEditorView: View {

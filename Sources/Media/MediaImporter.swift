@@ -3,6 +3,7 @@ import UIKit
 import PhotosUI
 import AVFoundation
 import UniformTypeIdentifiers
+import Editor
 
 /// Handles importing media from the camera roll and files.
 @MainActor

@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Editor
 
 /// Visual representation of a clip on the timeline.
 struct TimelineClipView: View {

@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreMedia
+import Editor
 
 /// Builds an AVMutableComposition from a Timeline model.
 /// This is the bridge between our data model and AVFoundation's rendering engine.

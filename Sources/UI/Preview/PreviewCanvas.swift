@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import SwiftUI
 import AVKit
+import Render
 
 /// Video preview canvas showing the current frame.
 public struct PreviewCanvas: View {

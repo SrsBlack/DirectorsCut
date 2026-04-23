@@ -1,4 +1,5 @@
 import Foundation
+import Editor
 
 /// Color grading parameters used to drive the Metal color-correction shader.
 public struct ColorGradingParameters: Codable, Equatable {

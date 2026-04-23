@@ -1,5 +1,7 @@
 import AVFoundation
 import Combine
+import Editor
+import Render
 
 /// Exports video compositions to files using AVAssetWriter.
 /// No watermarks. Full quality. Free forever.

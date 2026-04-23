@@ -1,4 +1,5 @@
 import AVFoundation
+import Editor
 
 /// Custom AVVideoCompositionInstruction that carries per-clip effect data.
 ///

@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Editor
 
 /// Home screen — lists saved projects with create / open / delete.
 public struct ProjectBrowserView: View {

@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Editor
 
 /// A single track row in the timeline showing its clips.
 struct TimelineTrackView: View {

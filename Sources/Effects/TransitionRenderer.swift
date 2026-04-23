@@ -1,5 +1,6 @@
 import Metal
 import CoreVideo
+import Editor
 
 /// Renders transitions between two video frames using Metal compute shaders.
 public final class TransitionRenderer {

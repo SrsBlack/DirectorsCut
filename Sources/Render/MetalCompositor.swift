@@ -1,6 +1,7 @@
 import AVFoundation
 import Metal
 import CoreVideo
+import Editor
 import Effects
 
 /// Custom AVVideoCompositing implementation that uses Metal for GPU-accelerated

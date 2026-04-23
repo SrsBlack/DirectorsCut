@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import UIKit
+import Editor
 
 /// Handles complex gesture interactions on the timeline (pinch to zoom, snapping, haptics).
 public final class TimelineGestureHandler {

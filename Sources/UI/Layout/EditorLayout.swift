@@ -1,5 +1,10 @@
 #if canImport(UIKit)
 import SwiftUI
+import Editor
+import Render
+import Media
+import Export
+import AI
 
 /// Main editor layout for iPhone — preview, toolbar, timeline.
 public struct EditorLayout: View {

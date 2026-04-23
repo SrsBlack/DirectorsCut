@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Editor
 
 /// Shows available transitions and lets the user pick one + set its duration.
 /// Presented when the user taps the gap between two adjacent clips.

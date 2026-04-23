@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Editor
 
 /// Properties panel for editing selected clip properties.
 public struct PropertiesPanel: View {

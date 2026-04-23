@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Editor
 
 /// Displays and edits keyframe tracks for an animated property.
 public struct KeyframeEditor: View {

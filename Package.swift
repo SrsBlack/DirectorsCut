@@ -29,10 +29,10 @@ let package = Package(
         ),
 
         // Metal GPU effects: shaders, color grading, transitions
-        // Must come before Render because Render depends on it.
+        // Depends on Editor for Effect/Transition types used in extensions.
         .target(
             name: "Effects",
-            dependencies: [],
+            dependencies: ["Editor"],
             path: "Sources/Effects",
             resources: [
                 .process("Shaders")

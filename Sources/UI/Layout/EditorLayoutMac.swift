@@ -1,5 +1,10 @@
 #if canImport(UIKit)
 import SwiftUI
+import Editor
+import Render
+import Media
+import Export
+import AI
 
 /// Expanded editor layout for iPad and Mac — sidebar + main panel split.
 public struct EditorLayoutMac: View {

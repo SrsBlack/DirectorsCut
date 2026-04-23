@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Render
 
 /// Play/pause, scrub, and navigation controls for the video preview.
 public struct TransportControls: View {

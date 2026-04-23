@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Editor
 
 /// Displays and edits the parameters of a single effect on a clip.
 public struct EffectControls: View {

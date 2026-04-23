@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import AI
 
 /// Displays and edits AI-generated captions on a clip.
 public struct CaptionEditorView: View {

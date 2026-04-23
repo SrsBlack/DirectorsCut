@@ -1,6 +1,12 @@
 #if canImport(UIKit)
 import SwiftUI
 import Combine
+import Editor
+import Render
+import Effects
+import Media
+import Export
+import AI
 
 /// Central app state coordinating all editor components.
 @MainActor

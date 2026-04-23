@@ -1,6 +1,7 @@
 #if canImport(UIKit)
 import SwiftUI
 import Photos
+import Export
 
 /// Export settings and progress UI.
 public struct ExportView: View {

@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Effects
 
 /// Full colour-grading panel — wheels, sliders, and presets.
 public struct ColorGradingView: View {

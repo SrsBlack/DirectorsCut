@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import UI
 
 /// Root view: shows the project browser, switches to the editor when a project is opened.
 public struct ContentView: View {

@@ -1,5 +1,6 @@
 #if canImport(UIKit)
 import SwiftUI
+import Media
 
 /// Media browser panel showing imported assets.
 public struct MediaBrowserView: View {

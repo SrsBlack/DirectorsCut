@@ -1,5 +1,6 @@
 import Foundation
 import AVFoundation
+import Editor
 
 /// Manages imported media assets for a project.
 @MainActor
