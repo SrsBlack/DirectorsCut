@@ -5,6 +5,7 @@ import Foundation
 public struct Timeline: Codable, Equatable {
     public var tracks: [Track]
     public var transitions: [TransitionEntry]
+    public var textOverlays: [TextClip]
     public var framerate: Double
     public var resolution: Resolution
 
@@ -71,11 +72,13 @@ public struct Timeline: Codable, Equatable {
     public init(
         tracks: [Track] = [],
         transitions: [TransitionEntry] = [],
+        textOverlays: [TextClip] = [],
         framerate: Double = 30.0,
         resolution: Resolution = .hd1080
     ) {
         self.tracks = tracks
         self.transitions = transitions
+        self.textOverlays = textOverlays
         self.framerate = framerate
         self.resolution = resolution
     }
@@ -135,6 +138,32 @@ public struct Timeline: Codable, Equatable {
     /// Remove a transition by ID
     public mutating func removeTransition(id: UUID) {
         transitions.removeAll { $0.id == id }
+    }
+
+    // MARK: - Text overlays
+
+    /// Add a text overlay at the current timeline end (or a given time).
+    public mutating func addTextOverlay(_ text: TextClip) {
+        textOverlays.append(text)
+        textOverlays.sort { $0.timelineStart < $1.timelineStart }
+    }
+
+    /// Remove a text overlay by ID.
+    @discardableResult
+    public mutating func removeTextOverlay(id: UUID) -> TextClip? {
+        guard let idx = textOverlays.firstIndex(where: { $0.id == id }) else { return nil }
+        return textOverlays.remove(at: idx)
+    }
+
+    /// Update a text overlay in place.
+    public mutating func updateTextOverlay(_ updated: TextClip) {
+        guard let idx = textOverlays.firstIndex(where: { $0.id == updated.id }) else { return }
+        textOverlays[idx] = updated
+    }
+
+    /// Text overlays visible at a given time.
+    public func textOverlays(at time: Double) -> [TextClip] {
+        textOverlays.filter { time >= $0.timelineStart && time < $0.timelineEnd }
     }
 
     /// Create a default timeline with one video and one audio track

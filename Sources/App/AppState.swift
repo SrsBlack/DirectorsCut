@@ -288,6 +288,36 @@ public final class AppState: ObservableObject {
         rebuildComposition()
     }
 
+    // MARK: - Text overlays
+
+    /// Add a text overlay at the current playhead position.
+    public func addTextOverlay(text: String = "Text", style: TextStyle = .title) {
+        let textClip = TextClip(
+            text: text,
+            style: style,
+            timelineStart: previewPlayer.currentTime,
+            duration: 3.0,
+            position: .center
+        )
+        project.timeline.addTextOverlay(textClip)
+        project.markModified()
+        syncTimeline()
+    }
+
+    /// Remove a text overlay by ID.
+    public func removeTextOverlay(id: UUID) {
+        project.timeline.removeTextOverlay(id: id)
+        project.markModified()
+        syncTimeline()
+    }
+
+    /// Update a text overlay (text content, style, position, timing).
+    public func updateTextOverlay(_ updated: TextClip) {
+        project.timeline.updateTextOverlay(updated)
+        project.markModified()
+        syncTimeline()
+    }
+
     /// Change the project's aspect ratio / resolution.
     public func setAspectRatio(_ preset: Project.AspectRatioPreset) {
         let oldRes = project.timeline.resolution

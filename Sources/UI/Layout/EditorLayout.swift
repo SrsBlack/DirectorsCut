@@ -8,6 +8,9 @@ public struct EditorLayout: View {
     @State private var showingExport = false
     @State private var showingClipEditor = false
     @State private var showingAspectPicker = false
+    @State private var showingTextEditor = false
+    @State private var showingTransitionPicker = false
+    @State private var editingTextClip = TextClip()
 
     public init(appState: AppState) {
         self.appState = appState
@@ -38,6 +41,8 @@ public struct EditorLayout: View {
                     onSplit: { appState.splitSelectedClipAtPlayhead() },
                     onDelete: { appState.deleteSelectedClip() },
                     onImport: { showingImporter = true },
+                    onText: { showingTextEditor = true },
+                    onTransition: { showingTransitionPicker = true },
                     onEdit: { showingClipEditor = true },
                     onExport: { showingExport = true }
                 )
@@ -88,6 +93,50 @@ public struct EditorLayout: View {
             .sheet(isPresented: $showingClipEditor) {
                 ClipEditorSheet(appState: appState)
             }
+            .sheet(isPresented: $showingTextEditor) {
+                TextEditorView(
+                    textClip: $editingTextClip,
+                    onDone: {
+                        appState.addTextOverlay(
+                            text: editingTextClip.text,
+                            style: editingTextClip.style
+                        )
+                        editingTextClip = TextClip()
+                        showingTextEditor = false
+                    },
+                    onCancel: {
+                        editingTextClip = TextClip()
+                        showingTextEditor = false
+                    }
+                )
+            }
+            .sheet(isPresented: $showingTransitionPicker) {
+                TransitionPickerView(
+                    onApply: { transition in
+                        // Find two adjacent clips to place the transition between
+                        let tracks = appState.project.timeline.videoTracks
+                        if let track = tracks.first,
+                           track.clips.count >= 2 {
+                            let sorted = track.clips.sorted { $0.timelineStart < $1.timelineStart }
+                            // Find the pair closest to the playhead
+                            let time = appState.previewPlayer.currentTime
+                            for i in 0..<(sorted.count - 1) {
+                                let gap = sorted[i + 1].timelineStart - sorted[i].timelineEnd
+                                if abs(gap) < 1.0 || time >= sorted[i].timelineStart && time <= sorted[i + 1].timelineEnd {
+                                    appState.addTransition(
+                                        transition,
+                                        from: sorted[i].id,
+                                        to: sorted[i + 1].id
+                                    )
+                                    break
+                                }
+                            }
+                        }
+                        showingTransitionPicker = false
+                    },
+                    onCancel: { showingTransitionPicker = false }
+                )
+            }
             .confirmationDialog("Aspect Ratio", isPresented: $showingAspectPicker, titleVisibility: .visible) {
                 ForEach(Project.AspectRatioPreset.allCases.filter { $0 != .custom }, id: \.self) { preset in
                     Button(preset.displayName) {
@@ -111,6 +160,8 @@ struct EditorToolbar: View {
     let onSplit: () -> Void
     let onDelete: () -> Void
     let onImport: () -> Void
+    let onText: () -> Void
+    let onTransition: () -> Void
     let onEdit: () -> Void
     let onExport: () -> Void
 
@@ -121,6 +172,8 @@ struct EditorToolbar: View {
                 ToolbarButton(icon: "arrow.uturn.forward",  label: "Redo",   isEnabled: canRedo, action: onRedo)
                 Divider().frame(height: 24)
                 ToolbarButton(icon: "plus.rectangle",       label: "Import", action: onImport)
+                ToolbarButton(icon: "textformat",           label: "Text",   action: onText)
+                ToolbarButton(icon: "arrow.triangle.swap",  label: "Trans.",  action: onTransition)
                 ToolbarButton(icon: "scissors",             label: "Split",  isEnabled: hasSelection, action: onSplit)
                 ToolbarButton(icon: "slider.horizontal.3",  label: "Edit",   isEnabled: hasSelection, action: onEdit)
                 ToolbarButton(icon: "trash",                label: "Delete", isEnabled: hasSelection, action: onDelete)

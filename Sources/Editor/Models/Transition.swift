@@ -33,18 +33,4 @@ public struct Transition: Identifiable, Codable, Equatable {
         self.parameters = parameters
     }
 
-    /// All available transition types with display names
-    public static let allTransitions: [(type: TransitionType, name: String)] = [
-        (.crossDissolve, "Cross Dissolve"),
-        (.fadeToBlack, "Fade to Black"),
-        (.fadeToWhite, "Fade to White"),
-        (.wipeLeft, "Wipe Left"),
-        (.wipeRight, "Wipe Right"),
-        (.wipeUp, "Wipe Up"),
-        (.wipeDown, "Wipe Down"),
-        (.slideLeft, "Slide Left"),
-        (.slideRight, "Slide Right"),
-        (.zoomIn, "Zoom In"),
-        (.zoomOut, "Zoom Out"),
-    ]
 }
