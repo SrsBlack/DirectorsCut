@@ -14,6 +14,8 @@ public final class AppState: ObservableObject {
     @Published public var project: Project
     @Published public var selectedClipId: UUID?
     @Published public var isEditorActive = false
+    // FIX(audit-2026-05-09 #A8): surface load errors to the UI instead of silently swallowing.
+    @Published public var loadError: Error?
 
     public let editHistory = EditHistory()
     public let previewPlayer = PreviewPlayer()
@@ -58,23 +60,31 @@ public final class AppState: ObservableObject {
             rebuildComposition()
             isEditorActive = true
         } catch {
-            // If load fails, stay on the browser
+            // FIX(audit-2026-05-09 #A8): publish error so UI can show a failure alert.
+            self.loadError = error
         }
     }
 
     /// Start editing a brand-new project.
     public func startNewProject(_ proj: Project) {
+        // FIX(audit-2026-05-09 #A7): invalidate any running autosave timer before
+        // starting a new one; prevents the previous project's timer from firing after switch.
+        autosaveTimer?.invalidate()
         project = proj
         projectURL = nil
         editHistory.clear()
         selectedClipId = nil
         syncTimeline()
+        setupAutosave()
         isEditorActive = true
     }
 
     /// Close the current project and return to the browser.
     public func closeProject() {
         save()
+        // FIX(audit-2026-05-09 #A7): stop autosave when project is closed.
+        autosaveTimer?.invalidate()
+        autosaveTimer = nil
         isEditorActive = false
         selectedClipId = nil
     }
@@ -492,6 +502,12 @@ public final class AppState: ObservableObject {
                 try? ProjectFile.save(self.project, to: url)
             }
         }
+    }
+
+    // FIX(audit-2026-05-09 #A7): stop autosave timer on dealloc to prevent leaks
+    // when AppState is replaced (e.g., during testing or future multi-window support).
+    deinit {
+        autosaveTimer?.invalidate()
     }
 }
 #endif

@@ -77,6 +77,16 @@ let package = Package(
             path: "Sources/UI"
         ),
 
+        // App coordinator: AppState, ContentView, DirectorsCutApp entry point
+        // FIX(audit-2026-05-09 #A1): Sources/App/ was orphaned — SwiftPM never compiled it.
+        // Adding this target makes the 549 LOC visible to the compiler. Latent compile
+        // errors in AppState.swift will now surface (that is intentional).
+        .target(
+            name: "App",
+            dependencies: ["UI", "Editor", "Render", "Export", "Effects", "Media"],
+            path: "Sources/App"
+        ),
+
         // Tests
         .testTarget(
             name: "EditorTests",

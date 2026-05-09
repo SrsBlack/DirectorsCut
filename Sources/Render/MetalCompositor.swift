@@ -158,15 +158,22 @@ public final class MetalCompositor: NSObject, AVVideoCompositing {
         var nextScratch = scratchA
         var otherScratch = scratchB
 
+        // FIX(audit-2026-05-09 #A5): swap scratch pointers BEFORE advancing current
+        // so that each iteration's dst always refers to the pre-swap nextScratch slot.
+        // Previous order (assign current=dst then swap) was equivalent here because dst
+        // is captured before the swap, but the explicit swap-first ordering prevents
+        // future confusion about which texture is live after a non-last iteration.
         for (i, effect) in effects.enumerated() {
             let isLast = (i == effects.count - 1)
+            let src = current
             let dst: MTLTexture = isLast ? output : nextScratch
 
-            dispatch(pipeline: pipeline, effect: effect, input: current, output: dst)
+            dispatch(pipeline: pipeline, effect: effect, input: src, output: dst)
 
             current = dst
-            // swap scratches
-            (nextScratch, otherScratch) = (otherScratch, nextScratch)
+            if !isLast {
+                (nextScratch, otherScratch) = (otherScratch, nextScratch)
+            }
         }
     }
 
@@ -230,6 +237,14 @@ public final class MetalCompositor: NSObject, AVVideoCompositing {
             )
 
         case .flip, .mirror, .crop, .filmGrain, .lut:
+            // FIX(audit-2026-05-09 #A10): these effect types are exposed in the UI
+            // (EffectControls.swift) but have no GPU implementation yet — they fall
+            // through to a no-op blit. The UI surfaces them as available, which is
+            // misleading. Implementation is deferred to a future milestone.
+            // TODO(A10): implement .flip/.mirror via Transform.metal transformFlip kernel,
+            //            .filmGrain via filmGrain kernel, .lut via applyLUT kernel,
+            //            .crop via a custom crop kernel.
+            print("[DirectorsCut] Effect \(effect.type) is not implemented — no-op pass-through")
             blitCopy(input: input, output: output)
         }
     }
@@ -264,11 +279,13 @@ public final class MetalCompositor: NSObject, AVVideoCompositing {
         return device.makeTexture(descriptor: desc)
     }
 
+    // FIX(audit-2026-05-09 #A6): removed `_ = device` no-op. `device` was in the
+    // guard pattern solely to check it's non-nil; it is not needed inside the body.
     private func blitCopy(input: MTLTexture, output: MTLTexture) {
-        guard let device, let queue = commandQueue,
+        guard commandQueue != nil,
+              let queue = commandQueue,
               let cmd = queue.makeCommandBuffer(),
               let blit = cmd.makeBlitCommandEncoder() else { return }
-        _ = device // silence unused-warning when device captured but not used directly
         let size = MTLSize(width: min(input.width, output.width),
                            height: min(input.height, output.height),
                            depth: 1)

@@ -1,6 +1,8 @@
 import Foundation
 
 /// Detects silent segments in audio for auto-cutting dead air.
+// FIX(audit-2026-05-09 #A14): @MainActor added for consistency with CaptionGenerator.swift:5.
+@MainActor
 public final class SilenceDetector {
     public struct SilentSegment {
         public let startTime: Double

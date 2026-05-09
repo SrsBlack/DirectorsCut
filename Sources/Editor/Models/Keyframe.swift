@@ -114,11 +114,16 @@ public struct KeyframeTrack: Identifiable, Codable, Equatable {
 
         let sorted = keyframes.sorted { $0.time < $1.time }
 
+        // FIX(audit-2026-05-09 #A2): replaced force-unwraps sorted.first!/sorted.last!
+        // with safe optional binding. The guard above makes them safe today, but future
+        // refactors (e.g. mid-function filter) could remove that guarantee and crash.
+        guard let first = sorted.first, let last = sorted.last else { return nil }
+
         // Before first keyframe
-        if time <= sorted.first!.time { return sorted.first!.value }
+        if time <= first.time { return first.value }
 
         // After last keyframe
-        if time >= sorted.last!.time { return sorted.last!.value }
+        if time >= last.time { return last.value }
 
         // Find the two surrounding keyframes
         for i in 0..<(sorted.count - 1) {
@@ -127,7 +132,7 @@ public struct KeyframeTrack: Identifiable, Codable, Equatable {
             }
         }
 
-        return sorted.last!.value
+        return last.value
     }
 
     /// Add a keyframe, maintaining chronological order

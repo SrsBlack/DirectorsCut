@@ -73,7 +73,17 @@ struct VideoPlayerView: UIViewRepresentable {
     class PlayerUIView: UIView {
         override class var layerClass: AnyClass { AVPlayerLayer.self }
 
-        var playerLayer: AVPlayerLayer { layer as! AVPlayerLayer }
+        // FIX(audit-2026-05-09 #A3): replaced force-cast with guarded cast.
+        // layerClass override makes this safe at runtime, but a misuse of PlayerUIView
+        // outside its UIKit hierarchy would previously crash silently. assertionFailure
+        // surfaces the invariant violation in debug builds.
+        var playerLayer: AVPlayerLayer {
+            guard let l = layer as? AVPlayerLayer else {
+                assertionFailure("PreviewCanvas.layerClass should be AVPlayerLayer")
+                return AVPlayerLayer()
+            }
+            return l
+        }
 
         var player: AVPlayer? {
             get { playerLayer.player }

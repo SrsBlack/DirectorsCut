@@ -1,6 +1,8 @@
 import Foundation
 
 /// Detects scene changes/cuts in video for auto-splitting long clips.
+// FIX(audit-2026-05-09 #A14): @MainActor added for consistency with CaptionGenerator.swift:5.
+@MainActor
 public final class SceneDetector {
     public struct SceneChange {
         public let time: Double

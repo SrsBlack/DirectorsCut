@@ -77,6 +77,15 @@ public struct ExportPreset: Identifiable {
 
     /// Build AVAssetWriter video settings from this preset
     public var videoSettings: [String: Any] {
+        // FIX(audit-2026-05-09 #A6-gap): HDR presets require HEVC Main10 profile (not
+        // Main_AutoLevel which defaults to 8-bit Main) and the pixel format must be
+        // 10-bit YCbCr through the entire pipeline. MetalCompositor.sourcePixelBufferAttributes
+        // also needs updating to kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange when HDR.
+        // The color properties were already correct; the profile and pixel format were missing.
+        let hevcProfile: String = isHDR
+            ? kVTProfileLevel_HEVC_Main10_AutoLevel as String
+            : kVTProfileLevel_HEVC_Main_AutoLevel as String
+
         var settings: [String: Any] = [
             AVVideoCodecKey: codec,
             AVVideoWidthKey: width,
@@ -84,7 +93,7 @@ public struct ExportPreset: Identifiable {
             AVVideoCompressionPropertiesKey: [
                 AVVideoAverageBitRateKey: videoBitRate,
                 AVVideoProfileLevelKey: codec == .hevc
-                    ? kVTProfileLevel_HEVC_Main_AutoLevel as String
+                    ? hevcProfile
                     : AVVideoProfileLevelH264HighAutoLevel,
             ],
         ]
@@ -98,6 +107,16 @@ public struct ExportPreset: Identifiable {
         }
 
         return settings
+    }
+
+    /// The CVPixelFormat that AVAssetWriter / MetalCompositor should use for this preset.
+    /// HDR requires 10-bit YCbCr; SDR uses the standard BGRA8 path.
+    // FIX(audit-2026-05-09 #A6-gap): expose pixel format so callers (ExportEngine,
+    // MetalCompositor) can configure the correct buffer format instead of always BGRA8.
+    public var pixelFormat: OSType {
+        isHDR
+            ? kCVPixelFormatType_420YpCbCr10BiPlanarVideoRange
+            : kCVPixelFormatType_32BGRA
     }
 
     /// Build AVAssetWriter audio settings

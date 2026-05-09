@@ -12,6 +12,11 @@ public final class PreviewPlayer: ObservableObject {
     public let player = AVPlayer()
     private var timeObserver: Any?
     private var statusObserver: NSKeyValueObservation?
+    // FIX(audit-2026-05-09 #A9): capture NotificationCenter observer tokens so they
+    // can be removed in deinit. Previously the token was discarded, leaving the block
+    // registered in NotificationCenter forever (the [weak self] prevented a retain
+    // cycle but the center still held the block).
+    private var notificationObservers: [NSObjectProtocol] = []
 
     public init() {
         setupTimeObserver()
@@ -21,6 +26,7 @@ public final class PreviewPlayer: ObservableObject {
         if let timeObserver {
             player.removeTimeObserver(timeObserver)
         }
+        notificationObservers.forEach { NotificationCenter.default.removeObserver($0) }
     }
 
     /// Load a composition for preview playback
@@ -40,7 +46,8 @@ public final class PreviewPlayer: ObservableObject {
             }
         }
 
-        NotificationCenter.default.addObserver(
+        // FIX(audit-2026-05-09 #A9): store token so removeObserver can be called in deinit.
+        let observer = NotificationCenter.default.addObserver(
             forName: .AVPlayerItemDidPlayToEndTime,
             object: playerItem,
             queue: .main
@@ -55,6 +62,7 @@ public final class PreviewPlayer: ObservableObject {
                 }
             }
         }
+        notificationObservers.append(observer)
     }
 
     /// Play or resume playback

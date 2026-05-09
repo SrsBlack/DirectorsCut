@@ -120,7 +120,7 @@ public final class FilterPipeline {
               let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
 
         var params = ChromaKeyParams(
-            keyColorR: 0, keyColorG: 1, keyColorB: 0,
+            keyColor: SIMD3<Float>(0, 1, 0),  // green — matches prior keyColorR/G/B: 0,1,0
             threshold: threshold, smoothing: smoothing
         )
 
@@ -138,26 +138,47 @@ public final class FilterPipeline {
     public func applyBlur(input: MTLTexture, output: MTLTexture, radius: Float = 10) {
         guard let hPipeline = computePipelines["gaussianBlurHorizontal"],
               let vPipeline = computePipelines["gaussianBlurVertical"],
-              let commandBuffer = commandQueue.makeCommandBuffer(),
-              let encoder = commandBuffer.makeComputeCommandEncoder() else { return }
+              let commandBuffer = commandQueue.makeCommandBuffer() else { return }
 
-        var params = BlurParams(radius: radius, kernelSize: Int32(ceil(radius * 2)))
+        // FIX(audit-2026-05-09 #A4-gap): the vertical pass previously bound `output`
+        // as BOTH texture(0) (read) and texture(1) (write). Metal validation fires in
+        // debug; release behaviour is undefined. Fix: allocate an intermediate texture
+        // for the horizontal pass output and feed it into the vertical pass as input.
+        //
+        // FIX(audit-2026-05-09 #A5-gap): Blur.metal:18 reads params.radius as sigma
+        // (`float sigma = params.radius`). Passing the user-facing radius directly
+        // means a radius=10 yields sigma=10 → effective sample radius=20 — double blur.
+        // Fix: convert radius → sigma = radius / 3.0 (standard Gaussian convention).
+        let sigma = radius / 3.0
+        var params = BlurParams(radius: sigma, kernelSize: Int32(ceil(sigma * 2)))
 
-        // Horizontal pass: input → output
-        encoder.setComputePipelineState(hPipeline)
-        encoder.setTexture(input, index: 0)
-        encoder.setTexture(output, index: 1)
-        encoder.setBytes(&params, length: MemoryLayout<BlurParams>.size, index: 0)
-        dispatchThreads(encoder: encoder, pipeline: hPipeline, texture: output)
+        // Allocate scratch texture for horizontal-pass output (intermediate result).
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: output.pixelFormat,
+            width: output.width, height: output.height, mipmapped: false
+        )
+        desc.usage = [.shaderRead, .shaderWrite]
+        guard let intermediate = device.makeTexture(descriptor: desc),
+              let hEncoder = commandBuffer.makeComputeCommandEncoder() else { return }
 
-        // Vertical pass: output → output (in-place via temp copy logic in shader)
-        encoder.setComputePipelineState(vPipeline)
-        encoder.setTexture(output, index: 0)
-        encoder.setTexture(output, index: 1)
-        encoder.setBytes(&params, length: MemoryLayout<BlurParams>.size, index: 0)
-        dispatchThreads(encoder: encoder, pipeline: vPipeline, texture: output)
+        // Horizontal pass: input → intermediate
+        hEncoder.setComputePipelineState(hPipeline)
+        hEncoder.setTexture(input, index: 0)
+        hEncoder.setTexture(intermediate, index: 1)
+        hEncoder.setBytes(&params, length: MemoryLayout<BlurParams>.size, index: 0)
+        dispatchThreads(encoder: hEncoder, pipeline: hPipeline, texture: intermediate)
+        hEncoder.endEncoding()
 
-        encoder.endEncoding()
+        guard let vEncoder = commandBuffer.makeComputeCommandEncoder() else { return }
+
+        // Vertical pass: intermediate → output (distinct textures — no aliasing)
+        vEncoder.setComputePipelineState(vPipeline)
+        vEncoder.setTexture(intermediate, index: 0)
+        vEncoder.setTexture(output, index: 1)
+        vEncoder.setBytes(&params, length: MemoryLayout<BlurParams>.size, index: 0)
+        dispatchThreads(encoder: vEncoder, pipeline: vPipeline, texture: output)
+        vEncoder.endEncoding()
+
         commandBuffer.commit()
         commandBuffer.waitUntilCompleted()
     }
@@ -247,12 +268,16 @@ struct TransitionParams {
     var softness: Float
 }
 
+// FIX(audit-2026-05-09 #A3-gap): Metal's float3 is 16-byte aligned with 16 bytes of storage
+// (12 bytes data + 4 bytes implicit padding). The previous struct used three separate Floats
+// (12 bytes, 4-byte aligned) so the bytes were mis-mapped: threshold landed in keyColor.w
+// (discarded), smoothing shifted into threshold, and smoothing read garbage.
+// Fix: use SIMD3<Float> (which Swift aligns to 16 bytes) + explicit _pad to match Metal layout.
 struct ChromaKeyParams {
-    var keyColorR: Float
-    var keyColorG: Float
-    var keyColorB: Float
-    var threshold: Float
-    var smoothing: Float
+    var keyColor: SIMD3<Float>   // 12 bytes data, 4 bytes implicit SIMD alignment padding → 16 bytes
+    var _pad: Float = 0          // explicit pad to reach 16-byte boundary before threshold
+    var threshold: Float         // offset 16
+    var smoothing: Float         // offset 20
 }
 
 struct BlurParams {

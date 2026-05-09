@@ -3,6 +3,8 @@ import CoreImage
 
 /// AI-powered background removal using Apple's Vision framework.
 /// Performs real-time person segmentation for green-screen-free background replacement.
+// FIX(audit-2026-05-09 #A14): @MainActor added for consistency with CaptionGenerator.swift:5.
+@MainActor
 public final class BackgroundRemover {
     public init() {}
 

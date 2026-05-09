@@ -2,7 +2,9 @@
 
 ## Core Principle
 
-**Rust for safety / performance → AVFoundation for video → Metal for GPU → SwiftUI/UIKit for UI**
+<!-- FIX(audit-2026-05-09 #A27): removed erroneous "Rust" claim. There is no Rust code,
+     Cargo.toml, .rs file, or FFI bridge in this repo. The actual stack is all Swift. -->
+**Pure Swift value types for safety / performance → AVFoundation for video → Metal for GPU → SwiftUI/UIKit for UI**
 
 More concretely:
 
@@ -119,7 +121,8 @@ Sources/
    Serialization/   ProjectFile (.dcut JSON save/load)
  Effects/
    Shaders/         ColorCorrection.metal  ChromaKey.metal  Blur.metal
-                    Transitions.metal  LUTApply.metal
+                    Transitions.metal  LUTApply.metal  Sharpen.metal  Transform.metal
+                    <!-- FIX(audit-2026-05-09 #A27): doc previously listed 5 shaders; repo has 7 -->
    ColorGrading.swift       (parameter presets, Effect extension)
    FilterPipeline.swift     (Metal compute dispatch helpers)
    TransitionRenderer.swift (transition frame rendering)
